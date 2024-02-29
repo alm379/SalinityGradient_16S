@@ -219,6 +219,7 @@ raw_ASV_table <- makeSequenceTable(merged_ASVs)
 # Write out the file to data/01_DADA2
 
 
+
 ```
 
 # Session Information
