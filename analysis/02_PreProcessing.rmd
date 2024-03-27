@@ -19,6 +19,8 @@ library(devtools)
 install_github("joey711/phyloseq")
 library(phyloseq)
 library(tidyverse)
+
+pacman:: p_load(devtools,phyloseq,tidyverse,dada2,install = FALSE)
 ```
 
 
@@ -32,11 +34,13 @@ Here, we will process the data into a phyloseq object.
 
 Then, we will remove the following:
 
-1. Chloroplasts
-2. Mitochondria
-3. Samples without "enough" reads.
+1. Remove chloroplasts
+2. Remove mitochondria
+3. Remove ASVs from negative controls and also negative control samples 
+4. Evaluate accuracy by looking at the Mock Community
+4. Remove samples without "enough" reads.
 
-Finally, write a data file of phyloseq output
+Finally, write a data file of phyloseq output, which will be stored in 'data/02_PreProcessing/raw_preprocessed_phyloseq.Rdata'
 
 # Load Data
 
@@ -133,4 +137,286 @@ raw_phyloseq
 # Save this raw phyloseq object
 
 save(raw_phyloseq, file = "data/02_PreProcessing/raw_phyloseq.RData")
+#View(raw_phyloseq)
 ```
+
+# Clean up the data
+
+Remove
+1. Chloroplasts
+2. Mitochondria
+
+```{r rm-mitos-chloros}
+# Remind myself of tax table
+#View(tax_mat)
+
+# Make new phyloseq without chloroplasts
+  # rm chloroplasts
+noChloros_physeq <- 
+  raw_phyloseq %>%
+  subset_taxa(Order != "Chloroplast" | is.na(Order))
+
+# How many taxa were chloroplasts
+num_chloro_ASVs <- ntaxa(raw_phyloseq) - ntaxa(noChloros_physeq)
+num_chloro_ASVs
+
+# Intuition Check
+#noChloros_physeq %>%
+# tax_table() %>%
+# data.frame() %>%
+# View()
+
+# remove mitochondria
+noChlorosMitos_physeq <- 
+  noChloros_physeq %>%
+  subset_taxa(Family != "Mitochondria" | is.na(Family))
+
+# How many mitochondrial ASVs?
+num_mito_ASVs <- ntaxa(noChloros_physeq) - ntaxa(noChlorosMitos_physeq)
+num_mito_ASVs
+
+noChlorosMitos_physeq
+
+# How many total ASVs were removed from chloroa and mitos
+
+ntaxa(raw_phyloseq) - ntaxa(noChlorosMitos_physeq)
+
+# Proportion of ASVs?
+
+ntaxa(noChlorosMitos_physeq)/ntaxa(raw_phyloseq)
+```
+
+# Evaluate and remove the control samples
+
+Take a look at the negative controls and then make a decision about whether or not to remove the ASVs that we found in our controls
+
+1. Negative controls
+2. ASVs found wihtin the negative controls and their distribnution in the samples.
+3. Evaluate the mock community
+
+
+## Negative controls
+```{r neg-controls}
+# create a vector of samples that were negative controls
+control_samples <- c("WaterControl", "022um-Control", "3um-Control", "DNA-Ext-Control")
+
+# Make a new phyloseq object of only the control samples
+
+control_physeq <- noChlorosMitos_physeq %>%
+  subset_samples(., names %in% control_samples) %>%
+  # force remove ASVs with 0 counts
+  prune_taxa(taxa_sums(.) > 0, .)
+
+control_physeq
+
+# vector of control ASVs
+control_ASVs <-
+  control_physeq %>%
+  tax_table() %>%
+  data.frame() %>%
+  dplyr::select(ASV) %>%
+  as.vector()
+
+control_ASVs
+
+# Visualize raw abundance values of control ASVs
+control_physeq %>%
+  plot_bar(., "ASV", fill = "ASV")
+
+########### Check the control ASVs in the samples
+# Make new phyloseq object with only the control ASVs and ALL samples
+
+controlASV_physeq <-
+  noChlorosMitos_physeq %>%
+  subset_taxa(., ASV %in% control_ASVs$ASV)
+
+# inspect it
+#View(controlASV_physeq)
+
+# Let's take a look at the abundances
+controlASV_physeq %>%
+    plot_bar(., "ASV", fill = "ASV", facet_grid = Sample_or_Control~.)
+
+# Check tax of ASV_3
+controlASV_physeq %>%
+  tax_table() %>%
+  data.frame() 
+  #View()
+
+# Would only like to keep ASV_18 and ASV_56, everything else is trash
+controlASVs_toREMOVE <- dplyr::setdiff(control_ASVs$ASV, c("ASV_18", "ASV_56"))
+# double check
+length(controlASVs_toREMOVE)
+
+### Make my new phyloseq object
+noControlsChlorosMitos_physeq <-
+  noChlorosMitos_physeq %>%
+  # Actually remove the control ASVs (except 18, 56)
+  subset_taxa(., !(ASV %in% controlASVs_toREMOVE)) %>%
+  # Remove control samples
+  subset_samples (., !(names %in% control_samples))
+
+# inspect no controls object
+noControlsChlorosMitos_physeq
+
+#After filtering, how many ASVs were removed?
+total_ASVs_rm <- ntaxa(raw_phyloseq) - ntaxa(noControlsChlorosMitos_physeq)
+total_ASVs_rm
+```
+
+# Evaluate Accuracy in the Mock Community
+
+- make a mock phyloseq object
+- load in the standard fasta sequences of the mock community
+- test for differences between the two
+
+```{r}
+# Make mock phyloseq object
+mock_physeq <- noChlorosMitos_physeq %>%
+  subset_samples(., names =="MockZymoPos") %>%
+  prune_taxa(taxa_sums(.) >0, .)
+
+#Inspect it
+
+mock_physeq
+
+tax_table(mock_physeq)
+
+#write us a message summarizing this
+
+cat("DADA2 inferred", ntaxa(mock_physeq), "ASVs present in the mock community")
+
+###### Load in the mock reference sequence from Zymo
+mock_ref <- getSequences("./analysis/02_PreProcessing/mock_amplicons.fasta")
+names(mock_ref)
+
+### Pull out seqs from Sequenced Mock community
+
+mock_seqs <- 
+  mock_physeq %>%
+  tax_table() %>%
+  data.frame () %>%
+  dplyr:: select(ASV,ASVseq)
+
+# Inspect
+head (mock_seqs)
+
+# Which ASVs match the reference?
+matched_asvs <-
+  mock_seqs %>%
+  rowwise() %>%
+  # check each ASV if they match, TRUE, if not = FALSE
+  mutate(Match = any(grepl(ASVseq, mock_ref)))
+  
+cat(nrow(matched_asvs), "ASVs were exact matches to the expected reference sequence")
+
+# How many sequences were in the mock?
+mock_seqdepth <- 
+  mock_physeq %>%
+  otu_table() %>%
+  data.frame() %>%
+  colSums()
+  
+# Who is in the sequenced mock community?
+
+mock_physeq %>%
+  tax_table () %>%
+  data.frame() %>%
+  dplyr::select(Genus, Species)
+
+names(mock_ref)
+
+# Curious: What are the mock counts in the acutal samples?
+
+noControlsChlorosMitos_physeq %>%
+  subset_taxa(., ASV %in% matched_asvs$ASV)%>%
+  otu_table() %>%
+  t()
+
+# Make a new phyloseq object without mock and its asvs
+noControlsMock_ChlorosMitos_physeq <- 
+  noControlsChlorosMitos_physeq %>%
+  #remove the mock community
+  subset_samples(., names != "MockZymoPos") %>%
+  #remove the ASVs from the mock
+  subset_taxa(., !(ASV %in% matched_asvs$ASV))
+
+# Intuition check
+num_ASVs_Mock <- ntaxa(noControlsChlorosMitos_physeq) -
+  ntaxa(noControlsMock_ChlorosMitos_physeq)
+stopifnot(num_ASVs_Mock == 8)
+```
+
+What can we conclude about the mock community?
+
+That all 8 ASVs in the mock exactly match 8 of 9 in the refrence file
+
+# Evaluate the Sequencing Depth
+```{r seq-depth}
+
+noControlsMock_ChlorosMitos_physeq
+
+#What is the library size/sequencing depth for each sample?
+
+seqSums_df <- noControlsMock_ChlorosMitos_physeq %>%
+  otu_table() %>%
+  # Sum each sample column
+  colSums() %>%
+  data.frame() %>%
+  rownames_to_column(var = "names") %>%
+  left_join(., metadata_track_reads_df, by = "names")
+
+#check
+dim (seqSums_df)
+head (seqSums_df)
+
+# Rename second column 
+colnames (seqSums_df)[2] <- "TotalSeqs"
+
+# Show the depth of samples
+seqSums_df %>%
+  dplyr::select(names, TotalSeqs) %>%
+  arrange(TotalSeqs)
+
+# Plot it!
+seqSums_df %>%
+  ggplot(aes(x=reorder(names, TotalSeqs), y = TotalSeqs,
+    fill = station)) +
+  geom_bar(stat = "identity")
+
+#Density plot
+seqSums_df %>%
+  ggplot(aes(TotalSeqs, fill = station)) +
+  geom_density(alpha = 0.5)
+```
+
+
+# Remove samples with few reads
+```{r rm-samps}
+# What's the min seq depth?
+min(sample_sums(noControlsMock_ChlorosMitos_physeq))
+
+# Remove 20210615-MA-SCB2F
+raw_preprocessed_phyloseq <-
+  noControlsMock_ChlorosMitos_physeq %>%
+  subset_samples(., names != "20210615-MA-SCB2F")
+
+# What's the new min seq depth?
+min(sample_sums(raw_preprocessed_phyloseq))
+```
+
+# Save Preprocessed Phyloseq Object
+```{r save-physeq}
+save(raw_preprocessed_phyloseq,
+     file = "analysis/02_PreProcessing/raw_preprocessed_phyloseq.RData")
+```
+
+
+
+
+
+#Session Information
+```{r, session-info}
+sessionInfo()
+```
+

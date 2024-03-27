@@ -1,0 +1,163 @@
+---
+title: "Biodiversity Analysis"
+author: "Andrea Martinez"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.align = "center",
+                      fig.path = "../figures/04_Biodiversity/") # send any figure output to this folder
+```
+
+# Setting the Environment
+
+## Set the seed
+```{r set-seed}
+set.seed(238428)
+```
+
+## Load Libraries
+```{r load-packages}
+pacman:: p_load(tidyverse, devtools, patchwork, iNEXT, phyloseq,
+                install = FALSE)
+```
+
+## Load in Data
+```{r load-data}
+load("/local/workdir/alm379/git_repos/SalinityGradient_16S/analysis/02_PreProcessing/raw_preprocessed_phyloseq.RData")
+raw_preprocessed_phyloseq
+
+# Intuition check
+min(sample_sums(raw_preprocessed_phyloseq))
+
+# Make metadata dataframe
+metadata_df<-raw_preprocessed_phyloseq%>%
+  sample_data()%>%
+  data.frame()
+
+# Setting colors for the stations
+station_colors <- c(
+  "Shipping Channel" = "dodgerblue4",
+  "Aransas Bay" = "dodgerblue2",
+  "Copano West" = "#D9CC3C",
+  "Copano East" = "#A0E0BA",
+  "Mesquite Bay" = "#00ADA7")
+```
+
+# Goals
+1. Calculate the Hill Diversity of the samples.
+2. Evaluate the rarefaction curves.
+3. Evaluate the diversity values
+4. Make notes of specific samples and their seq depth
+
+# Diversity Calculations with iNEXT
+
+```{r calc-div}
+#prepare input data
+iNEXT_input_df <- raw_preprocessed_phyloseq %>%
+  otu_table()%>%
+  data.frame()
+# Quick check
+dim(iNEXT_input_df)
+
+# Run iNEXT: Calculate the Hill Numbers
+# Note that: Species in ROWs, samples in COLUMNS
+# Remember to set the seed!
+#iNEXT_data <- iNEXT(iNEXT_input_df,
+#                    q = c(0,1,2), datatype = "abundance")
+# Save the file
+#save(iNEXT_data, file = "data/04_Biodiversity/iNEXT_data.RData")
+```
+
+# Evaluate the Diversity!
+```{r load-div}
+load("data/04_Biodiversity/iNEXT_data.RData")
+str(iNEXT_data)
+typeof(iNEXT_data)
+```
+
+# Plot Diversity
+```{r plot-rarefaction}
+# Prepare Colors
+
+color_df <-
+  iNEXT_input_df %>%
+  colnames() %>%
+  data.frame()
+# Rename the column
+colnames(color_df)[1] <- "names"
+# Check
+head(color_df)
+
+# Make a helper dataframe for plotting with colors
+iNEXT_color_df <- color_df%>%
+  # Fix the names for merging 
+  mutate(names = gsub(names, pattern = "[.]", replace = "-"), 
+         names = gsub(names, pattern = "X", replace = ""))%>%
+  # Merge with metadata
+  left_join(metadata_df, by = "names")%>%
+  # Merge with colors for plotting with ggiNEXT
+  left_join(data.frame(station_colors = station_colors,
+           station = names(station_colors)),
+           by = "station")
+```
+
+#Plot Rarefaction with 'ggiNEXT'
+
+```{r ggiNEXT, fig.width=8, fig.height =3.5}
+
+# Plot rarefaction!
+# Rarefaction/ectrapolation cure, type =1
+
+# Order q:
+# 0 = Richness/total number ot taxa
+# 1 = Exponential Shannon / Number of "Common" taxa
+# 2 = Inverse Simpson / Number of "Dominant" taxa
+
+ggiNEXT(iNEXT_data, type =1, facet.var = "Order.q") +
+  facet_wrap(~Order.q, scales = "fixed")+
+  scale_color_manual(values = iNEXT_color_df$station_colors, guide = FALSE)+
+  scale_fill_manual(values = iNEXT_color_df$station_colors, guide = FALSE)+
+  scale_shape_manual(values = base::rep(17, nsamples(raw_preprocessed_phyloseq)),
+                     guide = FALSE)+
+    theme(legend.position = "none")
+```
+
+# Manually plot Diversity
+
+## Rarefaction
+```{r iNEXT-manual}
+iNEXT_manual_df <- iNEXT_data$iNextEst$size_based %>%
+  dplyr::rename(names = Assemblage) %>%
+  # Fix the sample names
+  mutate(names = gsub(names, pattern = "[.]", replace = "-"),
+         names = gsub(names, pattern = "X", replace = "")) %>%
+  # join with metadata
+left_join(., metadata_df, by = "names") %>%
+  # add colors to data frame
+left_join(., data.frame(station_colors = station_colors,
+          station = names(station_colors)),
+by = "station")
+
+dim(iNEXT_manual_df)
+str(iNEXT_manual_df)
+
+# Plot it - Rarefaction Curve
+iNEXT_manual_df %>%
+  # filter out rows that are calculated by rarefaction from iNEXT
+  dplyr::filter(Method == "Extrapolation") %>% 
+  # Make the actual plot
+  # the # of sequences on the x-axis and diversity on the y-axis
+  # You can choose to pick one diversity value or plot all three
+  ggplot(aes(x=m , y=qD, color = station, group = names, group_by = names)) +
+  geom_line() +
+  # geom_point() +
+  facet_grid(Order.q ~ station, scales = "fixed") +
+  scale_color_manual(values = station_colors) +
+  theme(legend.position = "bottom")
+```
+
