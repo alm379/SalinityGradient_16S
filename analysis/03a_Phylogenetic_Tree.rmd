@@ -1,0 +1,52 @@
+---
+title: "Phylogenetic Tree Construction"
+author: "Andrea Martinez"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+# Goals of this file
+
+The goal is to create a phylogentic tree!
+
+1. Load in preprocessed phyloseq object.
+2. Create ASV file from the phyloseq object.
+3. Align the 16S sequencing from the fasta file with MAFFT.
+4. Create a tree with FastTree2.
+
+
+
+## Load Packages & Phyloseq Object
+```{r load-environment}
+# phytools, ggtree, RColorBrewer
+pacman::p_load(phytools, ggtree, RColorBrewer, install = FALSE)
+
+# Load physeq
+load("data/02_PreProcessing/raw_preprocessed_phyloseq.RData")
+raw_preprocessed_phyloseq
+```
+
+# Create Fasta file of ASV and their Sequences
+
+This fasta file will be used to create our alignment in MAFFT
+
+```{r create-preprocessed-fast}
+# pull out ASV seqs and ASV names
+ASVseq_df<-raw_preprocessed_phyloseq@tax_table %>%
+  data.frame() %>%
+  dplyr::select(ASV, ASVseq)
+
+#View(ASVseq_df)
+# Add the > to make fasta header
+ASVseq_df$ASV <- paste0(">", ASVseq_df$ASV)
+#View(ASVseq_df)
+# Create the fasta object
+ASVseq_fasta<-c(rbind(ASVseq_df$ASV,ASVseq_df$ASVseq))
+head (ASVseq_fasta)
+# Write to file
+write(ASVseq_fasta,
+      file = "data/03_PhylogeneticTree/preprocessed_ASV.fasta")
+```
+
+
