@@ -1,0 +1,28 @@
+---
+title: "Between Sample (Beta) Diversity of Microbes along a Salinity Gradient"
+author: "Andrea Martinez"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.path = "../figures/05_CommunityAnalysis")
+```
+
+#Goals
+1. Load in ohyloseq data with rooted tree
+2. Evaluate sequencing depth and remove sample
+3. Normalize the read counts between samples
+4. Calculate community dissimilarities. Numbers between 0 and 1. If 0, completely similar versus if they are 1, then they're completely dissimilar.
+  a. *Sorensen*: Shared Species as a binary value: Abundance-unweighted
+  b. *Bray-Curtis*: Shared Abundant species: Abundance-weighted
+  c. *(Abundance-) Weighted UNIFRAC*: Consider Abundant Species and where they fall on the tree
+5. Visualize the community data with two unconstrained Ordinations:
+ a. *PCoA*: Linear method. Eigenvalue = how much variation is explained by each axis. Choose to view axis 1,2,3, ect. and plot them together.
+ b. *NMDS*: Non-linear. Smuch multiple Dimensions into 2 or 3. Need to report a stress value (ideally <0.15). 
+6. Run statistics with PERMANOVA and betadispR.
+ 
+ 
+# Setup
+

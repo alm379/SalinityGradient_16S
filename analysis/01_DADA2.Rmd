@@ -23,7 +23,7 @@ knitr::opts_chunk$set(echo = TRUE,
 ## Set my seed
 ```{r set-seed}
 #Any number can be chosen
-set.seed(222)
+set.seed(238428)
 ```
 
 #Goals of this file
